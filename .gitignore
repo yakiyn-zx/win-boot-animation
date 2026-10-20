@@ -1,0 +1,18 @@
+# logs / runtime artifacts
+*.log
+launch.log
+*.bak
+*.lnk
+*.tmp
+
+# python
+__pycache__/
+*.pyc
+.venv/
+
+# personal intro videos (do NOT commit your own clips)
+videos/
+
+# OS
+.DS_Store
+Thumbs.db
