@@ -79,6 +79,26 @@ function Get-AppWindow([switch]$AnyTitle) {
     return $null
 }
 
+# All PIDs of the app (Electron spawns many; the window may live in any of
+# them, and the main process exposes a ZERO MainWindowHandle to
+# Get-Process).  Used by Find-AppWindow below.
+function Get-AppPids {
+    @(Get-Process -Name $AppProcess -ErrorAction SilentlyContinue |
+        Where-Object { $_.Id } |
+        ForEach-Object { [int]$_.Id })
+}
+
+# Robust app-window finder: enumerate top-level windows and match by owning
+# PID instead of trusting Get-Process MainWindowHandle (which is 0 for
+# Electron apps such as Doubao).  Returns @{ pid; hwnd } or $null.
+function Find-AppWindow {
+    $pids = Get-AppPids
+    if ($pids.Count -eq 0) { return $null }
+    $h = [WBIntro]::FindWindowByPids($pids)
+    if ($h -ne [IntPtr]::Zero) { return @{ pid = 0; hwnd = $h } }
+    return $null
+}
+
 # Is the app running at all?  Returns the browser-process PID or 0.
 # This is PROCESS-level, not window-level: the app can be tray-ified
 # (window destroyed, process alive) or minimized.  The keeper must never
@@ -114,7 +134,7 @@ function Kill-Kiosk {
 # Bring the app forward (restore if minimized, force foreground).
 function Focus-AppWindow([int]$Tries = 10) {
     for ($i = 0; $i -lt $Tries; $i++) {
-        $w = Get-AppWindow -AnyTitle
+        $w = Find-AppWindow
         if ($w) {
             if ([WBIntro]::IsIconic($w.hwnd)) { [WBIntro]::ShowWindow($w.hwnd, [WBIntro]::SW_RESTORE) | Out-Null }
             [WBIntro]::ForceForeground($w.hwnd)

@@ -31,7 +31,7 @@ param(
     [string]$AppTitleLike = 'WorkBuddy*',
     [string]$TitleTag     = 'WB-INTRO',
     [int]$PollMs       = 150,
-    [int]$SettleMs     = 2000,
+    [int]$SettleMs     = 600,
     [int]$HoldCapS     = 10,
     [int]$TotalCapS    = 90,
     [int]$WindowWaitS  = 12
@@ -150,7 +150,7 @@ try {
         }
 
         # --- is the app window up? ---------------------------------------
-        $wb = Get-AppWindow
+        $wb = Find-AppWindow
         if ($wb -and -not $wbAt) {
             $wbAt = $now
             Log 'app window visible'
@@ -167,15 +167,22 @@ try {
             Log 'video done + app settled -> finishing'
             break
         }
-        if ($introAt -and -not $wbAt -and -not $raised) {
-            # The video is over but the app has NO window at all (tray-ified,
-            # or closed while the intro held the screen).  Sitting on the
-            # frozen frame for HoldCapS seconds reads as "白等" -- raise one
-            # instance NOW, behind the still-pinned intro, and let the
-            # window come up while the intro still covers the screen.
-            $raised = $true
-            Log 'video done but no app window -> spawning instance to raise it'
-            try { Start-Process -FilePath $App } catch { Log "could not start app: $($_.Exception.Message)" }
+        if ($introAt -and -not $wb) {
+            $appProcUp = (Get-AppProcessId) -gt 0
+            if (-not $appProcUp -and -not $raised) {
+                # Truly no app process (closed / tray-ified): cold-start one.
+                $raised = $true
+                Log 'video done but app not running -> spawning instance'
+                try { Start-Process -FilePath $App } catch { Log "could not start app: $($_.Exception.Message)" }
+            } elseif ($appProcUp -and -not $raised) {
+                # App process is up (it is the running instance) but its
+                # window is not yet detectable.  NEVER spawn a second
+                # instance -- a single-instance app would just re-activate
+                # it, adding seconds of frozen-frame freeze.  Keep waiting
+                # for the window to become findable.
+                $raised = $true
+                Log 'video done, app process up but window not yet detectable -> waiting'
+            }
         }
         if ($introAt -and ($now - $introAt).TotalSeconds -ge $HoldCapS) {
             Log "app still not ready $HoldCapS s after the video -> finishing anyway"
@@ -204,7 +211,7 @@ if ($closed -gt 0) { Log "intro closed ($closed kiosk process(es))" }
 # skipped so early the app never started)?  Spawn one instance so the app
 # rebuilds/raises the window BEFORE we wait on activation -- otherwise
 # Focus-AppWindow spins for seconds with the intro already closed.
-if (-not (Get-AppWindow -AnyTitle)) {
+if (-not (Find-AppWindow)) {
     Log 'no app window -> spawning instance to raise it'
     try { Start-Process -FilePath $App } catch { Log "could not start app: $($_.Exception.Message)" }
 }

@@ -20,7 +20,7 @@ if ($veil -gt 0) { Log "veil dropped ($veil)" }
 
 # Window gone (tray-ified / closed while minimized)?  Spawn one instance
 # so the app rebuilds the window before we wait on activation.
-if (-not (Get-AppWindow -AnyTitle)) {
+if (-not (Find-AppWindow)) {
     Log 'no app window -> spawning instance to raise it'
     try { Start-Process -FilePath $App } catch { }
 }

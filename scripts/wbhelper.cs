@@ -15,6 +15,8 @@ public class WBIntro {
     [DllImport("user32.dll")] public static extern bool BringWindowToTop(IntPtr hWnd);
     [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
     [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+    [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+    public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
     [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
     [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr hWnd);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
@@ -38,6 +40,27 @@ public class WBIntro {
     // as a real NULL class name (matches any class).
     public static IntPtr FindWindowByTitle(string title) {
         return FindWindow(null, title);
+    }
+
+    // Electron main processes expose a ZERO MainWindowHandle to
+    // Get-Process, so the naive PowerShell window search misses the window
+    // entirely.  Walk every top-level window and return the first one
+    // owned by a process whose PID is in `pids` (preferring a window that
+    // actually has a title, i.e. the real main window).  Returns Zero if
+    // none found.
+    public static IntPtr FindWindowByPids(int[] pids) {
+        IntPtr found = IntPtr.Zero;
+        EnumWindows(delegate(IntPtr hWnd, IntPtr lParam) {
+            uint pid = 0;
+            GetWindowThreadProcessId(hWnd, out pid);
+            if (System.Array.IndexOf(pids, (int)pid) >= 0) {
+                if (found == IntPtr.Zero) found = hWnd;
+                string t = Title(hWnd);
+                if (t != null && t.Length > 0) { found = hWnd; return false; }
+            }
+            return true;
+        }, IntPtr.Zero);
+        return found;
     }
 
     public static int ProcessIdOf(IntPtr h) {
