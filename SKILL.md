@@ -2,18 +2,18 @@
 name: win-boot-animation
 display_name: Windows 应用启动动画安装器
 display_name_en: Windows App Boot Animation Installer
-description: 把一段本地视频（游戏/IDE 片头、DSH 启动动画插件提取的片头等）安装成 Windows 桌面应用的启动动画——点击应用图标后先播放窗口化片头、再无缝进入应用界面，且全程无窗口闪烁、无白屏。内含完整的防闪架构（深色遮罩 + WPF 原生播放器 + 置顶守护进程 + 内容就绪预加载）、客户区像素级对齐、.lnk 快捷方式等长替换手术工具、DSH 插件片头提取方法和全部踩坑记录。触发词：启动动画、片头、开场动画、boot animation、intro video、点击图标先播动画、启动无白屏、动画播完卡住、动画和工作台一样大、WorkBuddy 启动动画、DSH 启动动画。
-description_zh: 把本地视频安装成 Windows 桌面应用的启动动画，点击图标先播窗口化片头再无缝进入应用，全程无闪烁无白屏。
-description_en: Install a local video as the boot animation of a Windows desktop app — windowed intro first, then seamless handover to the already-loaded app, with zero flashing or white screens.
+description: 把一段本地视频（游戏/IDE 片头、DSH 启动动画插件提取的片头等）安装成 Windows 桌面应用的启动动画——点击应用图标后先全屏播放片头、再无缝进入应用界面，且全程无窗口闪烁、无白屏。内含完整的防闪架构（深色遮罩 + WPF 原生播放器 + 置顶守护进程 + 内容就绪预加载）、全屏工作区与客户区像素级对齐、.lnk 快捷方式等长替换手术工具、DSH 插件片头提取方法和全部踩坑记录。触发词：启动动画、片头、开场动画、boot animation、intro video、点击图标先播动画、启动无白屏、动画播完卡住、动画和工作台一样大、WorkBuddy 启动动画、DSH 启动动画。
+description_zh: 把本地视频安装成 Windows 桌面应用的启动动画，点击图标先全屏播片头再无缝进入应用，全程无闪烁无白屏。
+description_en: Install a local video as the boot animation of a Windows desktop app — fullscreen intro first, then seamless handover to the already-loaded app, with zero flashing or white screens.
 category: productivity
-version: 1.1.0
+version: 1.2.0
 author: 你的开发者名称（上架前务必替换）
 agent_created: true
 ---
 
 # Windows 应用启动动画安装器
 
-把任意本地视频做成 Windows 桌面应用（尤其 Electron 应用）的启动动画：点击图标 → 窗口化片头 → 已加载完成的应用就位，中间不闪窗口、不白屏、不露边。
+把任意本地视频做成 Windows 桌面应用（尤其 Electron 应用）的启动动画：点击图标 → 全屏片头 → 已加载完成的应用就位，中间不闪窗口、不白屏、不露边。
 
 ## 安全边界
 
@@ -26,7 +26,7 @@ agent_created: true
 ```
 点击图标（快捷方式目标 = 启动器 .vbs）
   ├─ 0ms    遮罩先自己把应用窗口藏到屏幕外，再盖上同尺寸深色遮罩
-  ├─ 0ms    启动 WPF 播放器（原生窗口，无边框窗口化置顶；不用浏览器——Edge 后台进程会劫持）
+  ├─ 0ms    启动 WPF 播放器（原生窗口，无边框全屏置顶、铺满主屏工作区；不用浏览器——Edge 后台进程会劫持）
   ├─ 0ms    启动守护进程（wait-kiosk.ps1）
   ├─ ~1s    播放器上屏 → 守护立即置顶 + 撤遮罩（无缝衔接）
   ├─ ~1s    应用已在运行？→ 不启动新实例（单实例应用会激活已有窗口=闪）
@@ -62,12 +62,12 @@ Electron 应用冷启动时窗口先出现、页面仍全白（实测约 3.5 秒
 | 文件 | 作用 |
 |---|---|
 | `launcher.vbs` | 启动器，快捷方式的新目标；wscript 运行无控制台窗口；防重入守卫；全部路径集中在顶部配置区 |
-| `play.ps1` | WPF 播放器（`-STA` 运行）：**窗口化置顶**（`-Width/-Height`，默认 1120×630 居中，不再全屏）、**默认带声音**（`-Muted` 可静音）、点击切换静音、Esc 跳过、播完定格打标记、30s 自关兜底 |
+| `play.ps1` | WPF 播放器（`-STA` 运行）：**无边框全屏置顶**（默认铺满主屏工作区；`-Width/-Height` 可切成窗口化）、**默认带声音**（`-Muted` 可静音）、点击切换静音、Esc 跳过、播完定格打标记、30s 自关兜底 |
 | `wait-kiosk.ps1` | 守护进程：等窗口上屏→置顶→按需启动应用→**全程把应用窗口藏在屏幕外**→内容就绪检测→摆位并快速关闭动画→激活应用 |
 | `stop-intro.ps1` | 快速通道：播放中再次点击图标→立即结束动画并聚焦应用 |
-| `veil.py` | 深色遮罩（Python ctypes 原生窗口）：与动画同尺寸；`--app <exe>` 会在画遮罩前先把应用窗口藏起来，避免应用边框从遮罩四周露出 |
+| `veil.py` | 深色遮罩（Python ctypes 原生窗口）：铺满主屏工作区（与动画同矩形）；`--app <exe>` 会在画遮罩前先把应用窗口藏起来，避免应用边框从遮罩四周露出 |
 | `ready-probe.py` | 内容就绪探针：`PrintWindow` + 灰度标准差，判断页面是白屏还是已渲染；`--app <exe>` 模式每轮自动刷新进程与窗口列表 |
-| `winframe.py` | 窗口几何工具：`measure` 列出窗口外框/客户区/边框增量，`delta`、`align-target`（按**实测**边框算目标外框）、`check-client`（校验客户区落点） |
+| `winframe.py` | 窗口几何工具：`workarea` 主屏工作区（全屏目标矩形）、`measure` 列出窗口外框/客户区/边框增量，`delta`、`align-target`（按**实测**边框算目标外框）、`check-client`（校验客户区落点） |
 | `wbutil.ps1` | 共享工具库：进程/窗口检测（按 PID 枚举、尺寸过滤、标题优先级）、客户区对齐、窗口停放/复位、置顶与强制前台、日志 |
 | `wbhelper.cs` + `build-helper.ps1` | P/Invoke Win32 助手源码与编译脚本（预编译成 DLL，守护启动 2s→0.3s） |
 | `lnktool.py` | .lnk 手术工具：`dump` 看结构 / `subst` 等长替换快捷方式目标 |
@@ -139,22 +139,25 @@ python lnktool.py dump "$DESKTOP/AppAnim.lnk"
 - 播放中点图标 → 2 秒内结束动画并聚焦
 - 应用冷启动（未运行）路径：加载与片头重叠，无片头后等待
 
-## 窗口化与像素级对齐
+## 全屏与像素级对齐
 
-片头窗口和应用的**客户区**必须落在同一个矩形上，否则会出现两类观感问题（本 skill 都踩过）：
+默认**全屏**：片头播放器、遮罩、应用的**客户区**三者落在同一个矩形上——**主屏工作区**（屏幕减去任务栏），否则会出现三类观感问题（本 skill 都踩过）：
 
 | 现象 | 原因 | 正确做法 |
 |---|---|---|
 | 动画结束后工作台比动画小、四周露动画边 | 只把应用外框设成动画尺寸，客户区被标题栏/边框吃掉（实测 1120×630 外框 → 1105×622 客户区） | 设尺寸时按**客户区**为目标：外框 = 目标 + 该窗口实测边框增量 |
 | 动画播放时能看到工作台白边/白边闪一下 | 应用窗口的外框**大于**无边框动画窗口，摆在屏幕上必露边 | 动画期间应用窗口一律藏到屏幕外（`x=-4000`），播完再摆进来 |
+| 底部约 40px 内容被任务栏压住 | 目标取了整块屏幕，而应用窗口不是 topmost | 目标取**工作区**（`SystemParametersInfo(SPI_GETWORKAREA)`），不是整屏 |
 
 要点：
 
-- **边框增量必须按窗口实测**（`winframe.py delta`）。Electron 窗口的 style 声称 `WS_CAPTION`，但应用自己绘制标题栏，`AdjustWindowRectEx` 会报 16×39 而实际只有 15×8；同一应用不同窗口的增量也可能不同（15×8 vs 15×37）。
-- **校准要闭环**：设置后量一次客户区落点，差几像素就补一次；写入缓存的最终外框，后续只用 `SetWindowPos`（实测移入 8ms，露边窗口期可忽略）。
-- **校准要在屏幕外做**：校准需要移动窗口，若此时动画还在屏幕上，那几帧就会露边。`Set-AppWindowRect -Offscreen` 就是为此。
+- **全屏 = 工作区，不是整屏**：播放器（WPF `SystemParameters.WorkArea`）、遮罩（`SPI_GETWORKAREA`）、守护（`winframe.py workarea`）三处取同一个矩形；任务栏始终可见，应用内容不会被压住。
+- **判据用"覆盖"，不用"相等"**：应用客户区必须**完全包含**动画矩形（少 1px 就露边），多出的几像素落在屏幕外或任务栏后面，看不出来。`Test-ClientOnIntroRect` 同时返回 `ok`（逐像素相等）和 `covers`（完全覆盖）。
+- **边框增量必须按窗口实测**（`winframe.py delta`）。Electron 窗口的 style 声称 `WS_CAPTION`，但应用自己绘制标题栏，`AdjustWindowRectEx` 会报 16×39 而实际只有 15×8；同一窗口在移动后还会重绘标题栏，实测出现过 15×7 / 15×8 / 15×15 三种增量。
+- **校准要闭环**：设置后量一次客户区落点，不足就按差值补；写入缓存的最终外框，后续只用 `SetWindowPos`（实测移入 3-8ms，露边窗口期可忽略）。
+- **校准要在屏幕外做**：校准需要移动窗口，若此时动画还在屏幕上，那几帧就会露边。`Set-AppWindowRect -Offscreen` 就是为此；离屏时用"客户区相对外框的偏移"推算正确位置，因此不需要窗口在可见区域内。
 - **关动画要快**：交接时先摆位（不动 z-order），再用窗口句柄取 PID 直接结束播放器（`Close-Kiosk` 走 WMI 有几百毫秒延迟，期间必露边）。
-- 默认尺寸 `1120×630`（16:9）在 1280×800 桌面上留 80px 边距；屏幕更小时按比例调小，保持 16:9。
+- 想回到窗口化：三处同填一个尺寸（见下）。
 
 ## 关键规则（违反必闪）
 
@@ -197,10 +200,12 @@ cp backup/startmenu-App.lnk.orig "$STARTMENU/App.lnk"
 | `-WindowWaitS` | `12` | 等播放器窗口上屏的上限 |
 | `-SelfCloseS` | `30` | 播放器自关兜底（视频时长+15 左右） |
 | `-Muted` | 关 | 播放器静音开关：默认**带声音**播放；加 `-Muted` 恢复静音起播 |
-| `-Width` / `-Height` | `1120` / `630` | 播放器窗口尺寸（16:9）。改这里必须同步 `wbutil.ps1` 的 `AppWinW/AppWinH` 与 `veil.py` 的 `VEIL_W/VEIL_H`，三处必须一致 |
+| `-Width` / `-Height` | `0` / `0` | `0` = 全屏（主屏工作区，任务栏可见）；填具体值则窗口化并在屏幕居中。要改窗口大小必须同步 `wbutil.ps1` 的 `AppWinW/AppWinH` 与 `veil.py` 的 `VEIL_W/VEIL_H` |
 | `-Video` | (必填) | 片头视频绝对路径 |
 
-### 尺寸要改的三个地方
+### 全屏 / 窗口化
+
+默认全屏，三处都用 0（播放器不传 `-Width/-Height`），矩形自动取主屏工作区。要改成窗口化，三处同步填同一个尺寸：
 
 ```powershell
 play.ps1     param([int]$Width = 1120, [int]$Height = 630)

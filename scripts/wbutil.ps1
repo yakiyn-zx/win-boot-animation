@@ -19,14 +19,51 @@ $ErrorActionPreference = 'Stop'
 $script:LogFile = Join-Path $PSScriptRoot 'launch.log'
 
 # ---- window geometry -------------------------------------------------------
-# The intro player AND the app work window share this fixed size: windowed
-# (NOT fullscreen), centered on the primary screen.  The intro fades out
-# onto the app window at exactly the same rect, so the handover is seamless.
-# 1120x630 (16:9) on this machine's 1280x800 desktop leaves ~80px at the
-# sides and ~85px above/below -- a clearly windowed app that still uses the
-# screen well.
-[int]$script:AppWinW = 1120
-[int]$script:AppWinH = 630
+# FULLSCREEN.  The intro player, the dark veil and the app's CLIENT area all
+# occupy the primary screen's work area (screen minus the taskbar) -- the
+# very same rect, pixel for pixel, so the handover from the last video frame
+# to the app is seamless and no sliver of the app's frame can peek around the
+# animation.
+#
+# Both values at 0 mean "use the work area".  Set them to an explicit size to
+# get a windowed intro back (the intro player takes the same -Width/-Height).
+[int]$script:AppWinW = 0
+[int]$script:AppWinH = 0
+
+$script:WorkAreaCache = $null
+
+# Primary screen work area as @{x;y;w;h}: screen minus taskbar, so a
+# fullscreen window is never covered by the taskbar.  Measured through
+# winframe.py (PowerShell cannot call SystemParametersInfo without compiling
+# code, and the Win32 helper DLL is frozen).
+function Get-WorkArea {
+    if ($script:WorkAreaCache) { return $script:WorkAreaCache }
+    $wa = $null
+    try {
+        if (Test-Path $script:ProbePython) {
+            $out = & $script:ProbePython (Join-Path $PSScriptRoot 'winframe.py') workarea 2>$null
+            if ($out -match '^\s*(-?\d+)\s+(-?\d+)\s+(\d+)\s+(\d+)') {
+                $wa = @{ x = [int]$Matches[1]; y = [int]$Matches[2]
+                         w = [int]$Matches[3]; h = [int]$Matches[4] }
+            }
+        }
+    } catch { }
+    if (-not $wa) {
+        $wa = @{ x = 0; y = 0
+                 w = [WBIntro]::GetSystemMetrics([WBIntro]::SM_CXSCREEN)
+                 h = [WBIntro]::GetSystemMetrics([WBIntro]::SM_CYSCREEN) }
+    }
+    if ($script:AppWinW -gt 0) { $wa.w = $script:AppWinW }
+    if ($script:AppWinH -gt 0) { $wa.h = $script:AppWinH }
+    $script:WorkAreaCache = $wa
+    return $wa
+}
+
+# The rect the intro player occupies: the work area itself.  Everything
+# (player, veil, app client area) must agree on this one rect.
+function Get-IntroRect {
+    return Get-WorkArea
+}
 
 # Frame overhead (outer size minus client size) per window handle, measured
 # once per handle through winframe.py -- PowerShell cannot call GetClientRect
@@ -36,19 +73,6 @@ $script:FrameDeltaCache = @{}
 # computed with AdjustWindowRectEx (asymmetric frames matter: a plain
 # "center the outer rect" leaves the content 1-2px off).
 $script:TargetRectCache = @{}
-
-# The rect the intro player occupies: centered AppWinW x AppWinH on the
-# primary screen.  Everything (player, veil, app client area) must agree.
-function Get-IntroRect {
-    $sw = [WBIntro]::GetSystemMetrics([WBIntro]::SM_CXSCREEN)
-    $sh = [WBIntro]::GetSystemMetrics([WBIntro]::SM_CYSCREEN)
-    return @{
-        x = [int](($sw - $script:AppWinW) / 2)
-        y = [int](($sh - $script:AppWinH) / 2)
-        w = $script:AppWinW
-        h = $script:AppWinH
-    }
-}
 
 # Outer rect ("x y w h") that makes the window's client area land exactly on
 # the intro rect.  Falls back to client+delta when python is unavailable.
@@ -70,7 +94,7 @@ function Get-TargetOuterRect([IntPtr]$Hwnd) {
     if (-not $rect) {
         $d = Get-FrameDelta $Hwnd
         $rect = @{ x = $ir.x; y = $ir.y
-                   w = $script:AppWinW + $d.w; h = $script:AppWinH + $d.h }
+                   w = $ir.w + $d.w; h = $ir.h + $d.h }
     }
     $script:TargetRectCache[$key] = $rect
     return $rect
@@ -92,11 +116,18 @@ function Get-FrameDelta([IntPtr]$Hwnd) {
     return $d
 }
 
-# Is the window's client area where the intro was?  Verified through
-# winframe.py because PowerShell cannot read GetClientRect / ClientToScreen.
+# Where is the window's client area relative to the intro rect?  Verified
+# through winframe.py because PowerShell cannot read GetClientRect /
+# ClientToScreen.
+#   ok     -- pixel-for-pixel identical (best case)
+#   covers -- the client area fully contains the intro rect, i.e. no corner
+#             of the animation can peek out around the app
+# The handover only needs `covers`: with the app fullscreen, a few pixels of
+# overhang land off-screen or behind the taskbar and are invisible, while a
+# single pixel SHORT would show a sliver of the animation.
 function Test-ClientOnIntroRect([IntPtr]$Hwnd) {
     $ir = Get-IntroRect
-    if (-not (Test-Path $script:ProbePython)) { return @{ ok = $true; unverified = $true } }
+    if (-not (Test-Path $script:ProbePython)) { return @{ ok = $true; covers = $true; unverified = $true } }
     try {
         $out = & $script:ProbePython (Join-Path $PSScriptRoot 'winframe.py') check-client `
             ([int64]$Hwnd).ToString() 2>$null
@@ -105,10 +136,13 @@ function Test-ClientOnIntroRect([IntPtr]$Hwnd) {
             $cw = [int]$Matches[3]; $ch = [int]$Matches[4]
             $ok = ([Math]::Abs($cx - $ir.x) -le 2) -and ([Math]::Abs($cy - $ir.y) -le 2) -and
                   ([Math]::Abs($cw - $ir.w) -le 2) -and ([Math]::Abs($ch - $ir.h) -le 2)
-            return @{ ok = $ok; x = $cx; y = $cy; w = $cw; h = $ch }
+            $covers = ($cx -le $ir.x) -and ($cy -le $ir.y) -and
+                      (($cx + $cw) -ge ($ir.x + $ir.w)) -and
+                      (($cy + $ch) -ge ($ir.y + $ir.h))
+            return @{ ok = $ok; covers = $covers; x = $cx; y = $cy; w = $cw; h = $ch }
         }
     } catch { }
-    return @{ ok = $true; unverified = $true }
+    return @{ ok = $true; covers = $true; unverified = $true }
 }
 
 # Move+resize a window so its CLIENT area is exactly the intro's rect.
@@ -138,30 +172,52 @@ function Set-AppWindowRect([IntPtr]$Hwnd, [switch]$Offscreen) {
             ([WBIntro]::SWP_NOZORDER -bor [WBIntro]::SWP_NOACTIVATE)) | Out-Null
 
         if ($fresh) {
-            # Closed-loop correction down to 0px: one pixel of app content
-            # peeking past the frameless intro already reads as a white edge.
-            # Doubao also re-attaches a caption right after being moved
-            # sometimes (real frame overhead measured at both 15x8 and
-            # 15x37), so measure what happened and correct.
+            # Closed-loop correction.  Acceptance is COVER, not equality:
+            # with the app fullscreen the client area has to contain the
+            # intro rect completely (a single pixel short = a visible sliver
+            # of animation), while a few pixels of overhang land off-screen
+            # or behind the taskbar.  Doubao re-attaches its caption right
+            # after being moved -- real frame overhead has been measured at
+            # 15x7, 15x8 and 15x15 on the same window -- so measure what
+            # actually happened and correct.
             $ir = Get-IntroRect
-            for ($i = 0; $i -lt 2; $i++) {
+            for ($i = 0; $i -lt 3; $i++) {
                 Start-Sleep -Milliseconds 200
                 $chk = Test-ClientOnIntroRect $Hwnd
                 if ($chk.unverified) { break }
-                $dx = $ir.x - $chk.x; $dy = $ir.y - $chk.y
-                $dw = $ir.w - $chk.w; $dh = $ir.h - $chk.h
-                if ($Offscreen) { $dx = 0; $dy = 0 }   # position is meaningless off-screen
-                if ($dx -eq 0 -and $dy -eq 0 -and $dw -eq 0 -and $dh -eq 0) {
-                    Log 'client area aligned to the intro rect (0px off)'
+                if ($chk.covers) {
+                    if ($chk.ok) { Log 'client area aligned to the intro rect (0px off)' }
                     break
                 }
-                $t = @{ x = $t.x + $dx; y = $t.y + $dy; w = $t.w + $dw; h = $t.h + $dh }
-                $qx = $t.x; $qy = $t.y
-                if ($Offscreen) { $qx = -4000; $qy = 300 }
-                [WBIntro]::SetWindowPos($Hwnd, [IntPtr]::Zero, $qx, $qy, $t.w, $t.h,
+                # Client origin relative to the window's outer origin: valid
+                # off-screen too, which is what lets the calibration happen
+                # while the window is parked.
+                $offx = $chk.x - $px
+                $offy = $chk.y - $py
+                $dw = [Math]::Max(0, $ir.w - $chk.w)
+                $dh = [Math]::Max(0, $ir.h - $chk.h)
+                $nt = @{ x = $ir.x - $offx; y = $ir.y - $offy
+                         w = $t.w + $dw;   h = $t.h + $dh }
+                # Converged?  (covers can never be true while parked, so
+                # compare the computed rect instead and stop early.)
+                if ($dw -eq 0 -and $dh -eq 0 -and
+                    [int64]$nt.x -eq [int64]$t.x -and [int64]$nt.y -eq [int64]$t.y) { break }
+                $t = $nt
+                $px = $t.x; $py = $t.y
+                if ($Offscreen) { $px = -4000; $py = 300 }
+                [WBIntro]::SetWindowPos($Hwnd, [IntPtr]::Zero, $px, $py, $t.w, $t.h,
                     ([WBIntro]::SWP_NOZORDER -bor [WBIntro]::SWP_NOACTIVATE)) | Out-Null
-                Log ("client off by ({0},{1}) {2}x{3} -> corrected" -f $dx, $dy, $dw, $dh)
+                Log ("client short by {0}x{1} (was {2}x{3} at ({4},{5})) -> corrected" -f `
+                    $dw, $dh, $chk.w, $chk.h, $chk.x, $chk.y)
             }
+            $fin = Test-ClientOnIntroRect $Hwnd
+            if (-not $fin.unverified) {
+                if (-not $fin.covers) {
+                    Log ("client still short: {0}x{1} at ({2},{3})" -f $fin.w, $fin.h, $fin.x, $fin.y)
+                }
+            }
+            # Cache the rect that puts the client area where it belongs, so the
+            # handover is a single instant SetWindowPos (measured: ~8ms).
             $script:TargetRectCache[$key] = $t
         }
         return $true
@@ -207,10 +263,14 @@ function Hold-AppWindowRect([int]$Seconds = 6, [IntPtr]$Hwnd = [IntPtr]::Zero) {
         if ($w) {
             $r = Get-WindowRect $w.hwnd
             $t = Get-TargetOuterRect $w.hwnd
-            if ($r -and [Math]::Abs($r.w - $t.w) -le 2 -and [Math]::Abs($r.h - $t.h) -le 2) {
+            # 8px tolerance: the app repaints its own caption a moment after
+            # being resized, which shifts the frame by up to ~8px without
+            # changing what the user sees.
+            if ($r -and [Math]::Abs($r.w - $t.w) -le 8 -and [Math]::Abs($r.h - $t.h) -le 8) {
                 $stableMs += 300
                 if ($stableMs -ge 900) {
-                    Log "app window holding ${script:AppWinW}x${script:AppWinH} client ($($t.w) x $($t.h) outer at ($($t.x),$($t.y)), reasserts=$reasserts)"
+                    $ir = Get-IntroRect
+                    Log "app window holding $($ir.w)x$($ir.h) client ($($t.w) x $($t.h) outer at ($($t.x),$($t.y)), reasserts=$reasserts)"
                     return $true
                 }
             } else {
@@ -528,7 +588,7 @@ function Kill-Kiosk {
 }
 
 # Bring the app forward (restore if minimized, force foreground) and pin
-# its work window to the fixed AppWinW x AppWinH rect.
+# its work window to the fullscreen (work area) rect.
 function Focus-AppWindow([int]$Tries = 10) {
     for ($i = 0; $i -lt $Tries; $i++) {
         $w = Find-AppWindow

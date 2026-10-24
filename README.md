@@ -1,13 +1,13 @@
 # win-boot-animation
 
-给 Windows 桌面应用装上「点击图标 → 窗口化播放启动动画 → 已加载完成的应用界面就位」的启动效果。原生 WPF 播放器，防闪架构，默认带声音。
+给 Windows 桌面应用装上「点击图标 → 全屏播放启动动画 → 已加载完成的应用界面就位」的启动效果。原生 WPF 播放器，防闪架构，默认带声音。
 
 ## 这是什么
 
 一个把任意本地 mp4 变成 Windows 桌面应用启动动画的安装工具（以 WorkBuddy Skill 形式打包；脚本为纯 Windows 技术栈，不依赖 WorkBuddy，其他 AI 或手动照本文档同样可用）：
 
-- 点击应用快捷方式 → 先播放窗口化片头（**默认带声音**，Esc 跳过，播放中再点一次立即结束）
-- 片头播放期间应用在后台启动、页面并行加载；播放器尺寸和应用**客户区**像素级对齐
+- 点击应用快捷方式 → 全屏播放片头（**默认带声音**，Esc 跳过，播放中再点一次立即结束）
+- 片头播放期间应用在后台启动、页面并行加载；播放器矩形和应用**客户区**像素级重合（默认铺满主屏工作区，任务栏保持可见）
 - **预加载**：动画期间应用窗口全程藏在屏幕外，内容探针确认页面真的画出来了才交接 —— 动画结束看到的就是已加载完的界面，没有白屏、没有边缘露出
 - 无浏览器、无单例、不劫持；用户态运行，不需要管理员权限，不联网
 
@@ -21,11 +21,11 @@
 | 文件 | 作用 |
 |---|---|
 | `scripts/launcher.vbs` | 启动器（快捷方式的新目标），负责遮罩 + 拉起播放器，再交给守护进程 |
-| `scripts/play.ps1` | WPF 窗口化置顶播放器（`-Width/-Height`，默认 1120×630）：默认带声音、左键切换静音、Esc 跳过、播完定格打标记 |
+| `scripts/play.ps1` | WPF 无边框**全屏**置顶播放器（默认铺满主屏工作区；`-Width/-Height` 可切成窗口化）：默认带声音、左键切换静音、Esc 跳过、播完定格打标记 |
 | `scripts/wait-kiosk.ps1` | 守护进程：等播放器上屏 → 启动应用 → 应用窗口全程藏在屏幕外 → 内容就绪检测 → 摆位并快速关闭动画 |
 | `scripts/ready-probe.py` | 内容就绪探针：`PrintWindow` + 灰度标准差，区分「白屏」与「已渲染」，避免动画播完还在白屏 |
-| `scripts/winframe.py` | 窗口几何工具：量边框增量、算客户区对齐的目标外框、校验落点 |
-| `scripts/veil.py` | 点击瞬间深色遮罩（与动画同尺寸，`--app` 会先藏应用窗口再盖上） |
+| `scripts/winframe.py` | 窗口几何工具：`workarea` 取全屏目标矩形、量边框增量、算客户区对齐的目标外框、校验落点 |
+| `scripts/veil.py` | 点击瞬间深色遮罩（铺满同一矩形，`--app` 会先藏应用窗口再盖上） |
 | `scripts/lnktool.py` | 快捷方式「等长替换」手术工具（不改 IDList，避免 lnk 损坏） |
 | `scripts/wbutil.ps1` / `wbhelper.cs`+`wbhelper.dll` | 窗口查找（按 PID 枚举）/ 客户区对齐 / 置顶 / 抢焦点的 P/Invoke 封装 |
 | `references/` | .lnk 手术方法论、踩坑记录（pitfalls）、片头提取说明 |
@@ -38,7 +38,9 @@ python = "<PATH_TO_PYTHON_EXE>"                   ' 任意 Python 3.x
 app    = "<PATH_TO_YOUR_APP_EXE>"                 ' 你的应用主程序
 ```
 
-想改动画尺寸时，三个文件里的常量必须一致：
+默认**全屏**：矩形取主屏工作区（屏幕减去任务栏），播放器、遮罩、应用客户区三者自动一致，不需要改任何常量。
+
+想改成窗口化时，三个文件里的值必须一致：
 
 ```powershell
 scripts/play.ps1    -Width 1120  -Height 630
@@ -70,9 +72,9 @@ MIT — 见 [LICENSE](LICENSE)。
 
 ## English
 
-Adds a **windowed** boot animation (any local mp4) to a Windows desktop app: click the
-shortcut → the intro plays (sound on by default, Esc to skip) → the app, already fully
-loaded, takes over the exact same rectangle.
+Adds a **fullscreen** boot animation (any local mp4) to a Windows desktop app: click the
+shortcut → the intro plays over the primary screen's work area (sound on by default, Esc to
+skip) → the app, already fully loaded, takes over the exact same rectangle.
 
 Two details make the handover clean:
 
@@ -82,7 +84,8 @@ Two details make the handover clean:
 - **Pixel alignment.** The intro player is frameless, the app window has a title bar and
   borders — so the app is sized by its *client area*, with the frame overhead measured per
   window (Electron lies about its caption: `AdjustWindowRectEx` reports 16×39 where the
-  real overhead is 15×8).
+  real overhead is 15×7-15×15). The acceptance test is *cover*, not equality: a pixel short
+  shows a sliver of the animation, a few pixels over land off-screen.
 
 Edit the three paths at the top of `scripts/launcher.vbs`, drop your intro at
 `videos/intro.mp4` (H.264 + AAC; HEVC may black-screen without the codec extension), and

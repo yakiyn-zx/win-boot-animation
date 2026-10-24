@@ -1,4 +1,4 @@
-# play.ps1 -- borderless windowed topmost video player for the boot intro.
+# play.ps1 -- borderless fullscreen topmost video player for the boot intro.
 #
 # Native WPF window: no browser, no singleton, no hijack.  (An Edge-kiosk
 # player was tried first and failed: Edge keeps a background-resident
@@ -21,8 +21,10 @@ param(
     [string]$Video,
     [int]$SelfCloseS  = 30,
     [string]$TitleTag = 'WB-INTRO',
-    [int]$Width       = 1120,
-    [int]$Height      = 630,
+    # 0 = fullscreen (the primary screen's work area).  Pass an explicit
+    # -Width/-Height for a windowed intro.
+    [int]$Width       = 0,
+    [int]$Height      = 0,
     [switch]$Muted
 )
 
@@ -38,15 +40,29 @@ $win.Background       = [System.Windows.Media.Brushes]::Black
 $win.Title            = $TitleTag
 $win.WindowStartupLocation = 'Manual'
 
-# windowed intro: a fixed 1120x630 window centered on the primary screen
-# (NOT fullscreen).  The keeper resizes the app work window to the same
-# rect, so the handover from the last frame to the app is seamless.
+# FULLSCREEN by default: the player covers the primary screen's work area
+# (screen minus taskbar) and the keeper puts the app's CLIENT area on exactly
+# the same rect, so the last frame hands over to the app with nothing of the
+# app's frame showing anywhere around it.
+#
+# The rect comes from WPF's SystemParameters.WorkArea; those values are in
+# device-independent units.  At 96 DPI (100% scaling) they equal pixels,
+# which is what the Win32 side (veil.py / winframe.py) uses -- keep the
+# display at 100% scaling, or set -Width/-Height explicitly.
+$wa = [System.Windows.SystemParameters]::WorkArea
 $sw = [System.Windows.SystemParameters]::PrimaryScreenWidth
 $sh = [System.Windows.SystemParameters]::PrimaryScreenHeight
-$win.Left   = [int](($sw - $Width)  / 2)
-$win.Top    = [int](($sh - $Height) / 2)
-$win.Width  = $Width
-$win.Height = $Height
+if ($Width -le 0 -or $Height -le 0) {
+    $win.Left   = [int]$wa.Left
+    $win.Top    = [int]$wa.Top
+    $win.Width  = [int]$wa.Width
+    $win.Height = [int]$wa.Height
+} else {
+    $win.Left   = [int](($sw - $Width)  / 2)
+    $win.Top    = [int](($sh - $Height) / 2)
+    $win.Width  = $Width
+    $win.Height = $Height
+}
 
 $vid = New-Object System.Windows.Controls.MediaElement
 $vid.Stretch  = 'Fill'

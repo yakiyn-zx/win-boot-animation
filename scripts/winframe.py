@@ -118,6 +118,21 @@ def align_target(hwnd, cx, cy, cw, ch):
     print("%d %d %d %d" % (cx - left, cy - top, cw + fw, ch + fh))
     return 0
 
+SPI_GETWORKAREA = 0x0030
+
+def workarea():
+    """Print "x y w h" of the primary screen's work area (taskbar excluded).
+    This is the fullscreen rect the intro, the veil and the app's client area
+    all share: the screen minus the taskbar, so a "fullscreen" app window is
+    never covered by the taskbar at the bottom."""
+    r = RECT()
+    if u32.SystemParametersInfoW(SPI_GETWORKAREA, 0, ctypes.byref(r), 0):
+        print("%d %d %d %d" % (r.l, r.t, r.r - r.l, r.b - r.t))
+        return 0
+    # fallback: the whole screen
+    print("0 0 %d %d" % (u32.GetSystemMetrics(0), u32.GetSystemMetrics(1)))
+    return 0
+
 def check_client(hwnd):
     """Print "cx cy cw ch" of the window's client area (screen coords)."""
     if not u32.IsWindow(hwnd):
@@ -132,6 +147,8 @@ def check_client(hwnd):
     return 0
 
 if __name__ == "__main__":
+    if len(sys.argv) >= 2 and sys.argv[1] == "workarea":
+        sys.exit(workarea())
     if len(sys.argv) >= 3 and sys.argv[1] == "delta":
         sys.exit(delta_for(int(sys.argv[2])))
     if len(sys.argv) >= 3 and sys.argv[1] == "check-client":

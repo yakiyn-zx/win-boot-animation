@@ -63,8 +63,10 @@ PM_REMOVE = 0x0001
 SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN = 76, 77
 SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN = 78, 79
 SM_CXSCREEN, SM_CYSCREEN = 0, 1
-# Same rect as the intro player and the app's client area.
-VEIL_W, VEIL_H = 1120, 630
+SPI_GETWORKAREA = 0x0030
+# 0,0 = cover the primary screen's whole work area (fullscreen, taskbar
+# still visible).  A non-zero size makes a centered windowed veil instead.
+VEIL_W, VEIL_H = 0, 0
 
 u.DefWindowProcW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM,
                              wintypes.LPARAM]
@@ -146,12 +148,24 @@ def main():
     if not u.RegisterClassW(ctypes.byref(wc)):
         return
 
-    # windowed veil: the same fixed 1120x630 centered rect as the intro
-    # player and the app work window (nothing fullscreen, ever)
-    x = (u.GetSystemMetrics(SM_CXSCREEN) - VEIL_W) // 2
-    y = (u.GetSystemMetrics(SM_CYSCREEN) - VEIL_H) // 2
-    w = VEIL_W
-    h = VEIL_H
+    # FULLSCREEN veil: the primary screen's work area -- the exact rect the
+    # intro player and the app's client area take, so click -> veil -> intro
+    # -> app all line up with nothing changing size along the way.
+    wr = wintypes.RECT()
+    if u.SystemParametersInfoW(SPI_GETWORKAREA, 0, ctypes.byref(wr), 0):
+        wa_x, wa_y = wr.left, wr.top
+        wa_w, wa_h = wr.right - wr.left, wr.bottom - wr.top
+    else:
+        wa_x = wa_y = 0
+        wa_w = u.GetSystemMetrics(SM_CXSCREEN)
+        wa_h = u.GetSystemMetrics(SM_CYSCREEN)
+
+    if VEIL_W <= 0 or VEIL_H <= 0:
+        x, y, w, h = wa_x, wa_y, wa_w, wa_h
+    else:
+        x = wa_x + (wa_w - VEIL_W) // 2
+        y = wa_y + (wa_h - VEIL_H) // 2
+        w, h = VEIL_W, VEIL_H
 
     hwnd = u.CreateWindowExW(
         WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT,
