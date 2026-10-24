@@ -17,6 +17,8 @@ $killed = Kill-Kiosk
 if ($closed -gt 0 -or $killed -gt 0) { Log "intro stopped (closed=$closed killed=$killed)" }
 $veil = Kill-Veil
 if ($veil -gt 0) { Log "veil dropped ($veil)" }
+$probeKilled = Kill-ReadyProbe
+if ($probeKilled -gt 0) { Log "ready probe stopped ($probeKilled)" }
 
 # Window gone (tray-ified / closed while minimized)?  Spawn one instance
 # so the app rebuilds the window before we wait on activation.
@@ -30,4 +32,7 @@ if (Focus-AppWindow) {
 } else {
     Log 'no app window to focus'
 }
+
+# Same async-bounds fight as the keeper's finish: clamp to the fixed rect.
+Hold-AppWindowRect | Out-Null
 exit 0

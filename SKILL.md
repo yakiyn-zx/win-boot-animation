@@ -2,18 +2,18 @@
 name: win-boot-animation
 display_name: Windows 应用启动动画安装器
 display_name_en: Windows App Boot Animation Installer
-description: 把一段本地视频（游戏/IDE 片头、DSH 启动动画插件提取的片头等）安装成 Windows 桌面应用的启动动画——点击应用图标后先全屏播放片头、再打开应用本体，且全程无窗口闪烁。内含完整的防闪架构（深色遮罩 + WPF 原生播放器 + 置顶守护进程）、.lnk 快捷方式等长替换手术工具、DSH 插件片头提取方法和全部踩坑记录。触发词：启动动画、片头、开场动画、boot animation、intro video、点击图标先播动画、WorkBuddy 启动动画、DSH 启动动画。
-description_zh: 把本地视频安装成 Windows 桌面应用的启动动画，点击图标先全屏播片头再开应用，全程无窗口闪烁。
-description_en: Install a local video as the boot animation of a Windows desktop app, full-screen intro first then the app opens, with zero window flashing.
+description: 把一段本地视频（游戏/IDE 片头、DSH 启动动画插件提取的片头等）安装成 Windows 桌面应用的启动动画——点击应用图标后先播放窗口化片头、再无缝进入应用界面，且全程无窗口闪烁、无白屏。内含完整的防闪架构（深色遮罩 + WPF 原生播放器 + 置顶守护进程 + 内容就绪预加载）、客户区像素级对齐、.lnk 快捷方式等长替换手术工具、DSH 插件片头提取方法和全部踩坑记录。触发词：启动动画、片头、开场动画、boot animation、intro video、点击图标先播动画、启动无白屏、动画播完卡住、动画和工作台一样大、WorkBuddy 启动动画、DSH 启动动画。
+description_zh: 把本地视频安装成 Windows 桌面应用的启动动画，点击图标先播窗口化片头再无缝进入应用，全程无闪烁无白屏。
+description_en: Install a local video as the boot animation of a Windows desktop app — windowed intro first, then seamless handover to the already-loaded app, with zero flashing or white screens.
 category: productivity
-version: 1.0.0
+version: 1.1.0
 author: 你的开发者名称（上架前务必替换）
 agent_created: true
 ---
 
 # Windows 应用启动动画安装器
 
-把任意本地视频做成 Windows 桌面应用（尤其 Electron 应用）的启动动画：点击图标 → 全屏片头 → 应用就位，一次完成，中间不闪任何窗口。
+把任意本地视频做成 Windows 桌面应用（尤其 Electron 应用）的启动动画：点击图标 → 窗口化片头 → 已加载完成的应用就位，中间不闪窗口、不白屏、不露边。
 
 ## 安全边界
 
@@ -25,29 +25,50 @@ agent_created: true
 
 ```
 点击图标（快捷方式目标 = 启动器 .vbs）
-  ├─ 0ms    全屏深色遮罩立即盖上（点击穿透，盖住旧屏幕与播放器启动白窗）
-  ├─ 0ms    启动 WPF 播放器（原生窗口，无边框全屏置顶；不用浏览器——Edge 后台进程会劫持）
+  ├─ 0ms    遮罩先自己把应用窗口藏到屏幕外，再盖上同尺寸深色遮罩
+  ├─ 0ms    启动 WPF 播放器（原生窗口，无边框窗口化置顶；不用浏览器——Edge 后台进程会劫持）
   ├─ 0ms    启动守护进程（wait-kiosk.ps1）
   ├─ ~1s    播放器上屏 → 守护立即置顶 + 撤遮罩（无缝衔接）
   ├─ ~1s    应用已在运行？→ 不启动新实例（单实例应用会激活已有窗口=闪）
   │         未在运行？→ 后台启动，冷启动时间与片头重叠
-  ├─ 7s     视频播放（默认带声音，点击切换静音，Esc 跳过）
-  ├─ 7s     视频放完 → 播放器定格最后一帧 + 标题打 <tag>-DONE 标记
-  └─ 就绪   应用窗口就绪+2s 稳定 → 关动画、激活应用（永不停在白屏）
-          视频结束时一个窗口都没有（托盘化）？→ 立刻 spawn 实例，
-          在仍置位的片头后面把窗口拉出来，再走上面的就绪判定
+  │        （无论冷热）应用所有大窗口一律藏到屏幕外，动画期间屏幕上只有动画
+  ├─ 视频播放（默认带声音，点击切换静音，Esc 跳过）
+  ├─ 视频放完 → 播放器定格最后一帧 + 标题打 <tag>-DONE 标记
+  ├─ 就绪   内容探针确认页面真的画出来了（冷启动时边藏边等，最长 HoldCapS）
+  └─ 交接   应用窗口先摆到动画那个矩形（含边框补偿）→ 立刻关闭动画 →
+            激活应用：用户看到的是"动画最后一帧 → 已加载完的界面"，无白屏、无露边
 ```
+
+### 两条启动路径
+
+| 路径 | 条件 | 行为 |
+|---|---|---|
+| 冷启动 | 应用进程不存在 | 启动实例 → 窗口出现即藏到屏幕外 → 探针等页面加载 → 播完交接 |
+| 热启动 | 进程已存在（含托盘化） | 不启新实例 → 直接藏窗口 → 立即视为就绪 → 播完交接；托盘化的窗口会被重新显示 |
+
+### 预加载：为什么不再白屏
+
+Electron 应用冷启动时窗口先出现、页面仍全白（实测约 3.5 秒），旧版本只等"窗口句柄出现"就交接，于是用户看到白屏。
+
+现在用的是**内容就绪检测**：
+
+1. 窗口一出现就移到屏幕外（实测：移出屏幕不影响页面加载）
+2. `ready-probe.py` 每 0.25s 对应用所有大窗口做一次 `PrintWindow` 截图（不受动画遮挡影响），算中心区域灰度标准差：白屏 ≈ 0，已加载 ≈ 30+
+3. 连续两次 ≥ 阈值（默认 15）→ 判定就绪，记录"真正画出内容的那个窗口句柄"
+4. 视频播完 + 页面就绪 → 才允许交接；页面慢就留着动画最后一帧等（上限 `-HoldCapS`）
 
 ## 组件（scripts/）
 
 | 文件 | 作用 |
 |---|---|
 | `launcher.vbs` | 启动器，快捷方式的新目标；wscript 运行无控制台窗口；防重入守卫；全部路径集中在顶部配置区 |
-| `play.ps1` | WPF 播放器（`-STA` 运行）：全屏置顶、**默认带声音**（`-Muted` 可静音）、点击切换静音、Esc 跳过、播完定格打标记、30s 自关兜底 |
-| `wait-kiosk.ps1` | 守护进程：等窗口上屏→置顶→按需启动应用→150ms 置顶循环→等 `<tag>-DONE` 标记→激活应用 |
+| `play.ps1` | WPF 播放器（`-STA` 运行）：**窗口化置顶**（`-Width/-Height`，默认 1120×630 居中，不再全屏）、**默认带声音**（`-Muted` 可静音）、点击切换静音、Esc 跳过、播完定格打标记、30s 自关兜底 |
+| `wait-kiosk.ps1` | 守护进程：等窗口上屏→置顶→按需启动应用→**全程把应用窗口藏在屏幕外**→内容就绪检测→摆位并快速关闭动画→激活应用 |
 | `stop-intro.ps1` | 快速通道：播放中再次点击图标→立即结束动画并聚焦应用 |
-| `veil.py` | 深色遮罩（Python ctypes 原生窗口）：点击到上屏之间的无缝覆盖 |
-| `wbutil.ps1` | 共享工具库：进程/窗口检测、播放器窗口按标题查找、置顶与强制前台、日志 |
+| `veil.py` | 深色遮罩（Python ctypes 原生窗口）：与动画同尺寸；`--app <exe>` 会在画遮罩前先把应用窗口藏起来，避免应用边框从遮罩四周露出 |
+| `ready-probe.py` | 内容就绪探针：`PrintWindow` + 灰度标准差，判断页面是白屏还是已渲染；`--app <exe>` 模式每轮自动刷新进程与窗口列表 |
+| `winframe.py` | 窗口几何工具：`measure` 列出窗口外框/客户区/边框增量，`delta`、`align-target`（按**实测**边框算目标外框）、`check-client`（校验客户区落点） |
+| `wbutil.ps1` | 共享工具库：进程/窗口检测（按 PID 枚举、尺寸过滤、标题优先级）、客户区对齐、窗口停放/复位、置顶与强制前台、日志 |
 | `wbhelper.cs` + `build-helper.ps1` | P/Invoke Win32 助手源码与编译脚本（预编译成 DLL，守护启动 2s→0.3s） |
 | `lnktool.py` | .lnk 手术工具：`dump` 看结构 / `subst` 等长替换快捷方式目标 |
 
@@ -63,6 +84,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File ~/.workbuddy/boot-animation/
 ```
 
 视频来源：DSH 插件包提取方法见 `references/dsh-extraction.md`（zip 内嵌 base64 或运行中实例的 media 路由）。
+编码不是 H.264 时先按「视频编码要求」转码。
+
+`veil.py` / `ready-probe.py` / `winframe.py` 需要 python（启动器配置区里的 `python` 路径）。若目标机器没有 python：
+遮罩会缺失（最多少量闪窗）、内容探针会退回纯计时交接（仍能工作，只是不再有"预加载"效果），不会装坏。
 
 ### 2. 配置启动器
 
@@ -114,16 +139,37 @@ python lnktool.py dump "$DESKTOP/AppAnim.lnk"
 - 播放中点图标 → 2 秒内结束动画并聚焦
 - 应用冷启动（未运行）路径：加载与片头重叠，无片头后等待
 
+## 窗口化与像素级对齐
+
+片头窗口和应用的**客户区**必须落在同一个矩形上，否则会出现两类观感问题（本 skill 都踩过）：
+
+| 现象 | 原因 | 正确做法 |
+|---|---|---|
+| 动画结束后工作台比动画小、四周露动画边 | 只把应用外框设成动画尺寸，客户区被标题栏/边框吃掉（实测 1120×630 外框 → 1105×622 客户区） | 设尺寸时按**客户区**为目标：外框 = 目标 + 该窗口实测边框增量 |
+| 动画播放时能看到工作台白边/白边闪一下 | 应用窗口的外框**大于**无边框动画窗口，摆在屏幕上必露边 | 动画期间应用窗口一律藏到屏幕外（`x=-4000`），播完再摆进来 |
+
+要点：
+
+- **边框增量必须按窗口实测**（`winframe.py delta`）。Electron 窗口的 style 声称 `WS_CAPTION`，但应用自己绘制标题栏，`AdjustWindowRectEx` 会报 16×39 而实际只有 15×8；同一应用不同窗口的增量也可能不同（15×8 vs 15×37）。
+- **校准要闭环**：设置后量一次客户区落点，差几像素就补一次；写入缓存的最终外框，后续只用 `SetWindowPos`（实测移入 8ms，露边窗口期可忽略）。
+- **校准要在屏幕外做**：校准需要移动窗口，若此时动画还在屏幕上，那几帧就会露边。`Set-AppWindowRect -Offscreen` 就是为此。
+- **关动画要快**：交接时先摆位（不动 z-order），再用窗口句柄取 PID 直接结束播放器（`Close-Kiosk` 走 WMI 有几百毫秒延迟，期间必露边）。
+- 默认尺寸 `1120×630`（16:9）在 1280×800 桌面上留 80px 边距；屏幕更小时按比例调小，保持 16:9。
+
 ## 关键规则（违反必闪）
 
 1. **不用浏览器做播放器**——Edge 后台驻留进程会劫持 kiosk 启动（视频塞进用户自己的 profile，片头不播还闪窗）。用 play.ps1 原生 WPF 窗口。
 2. **进程级检测应用是否在运行**，不是窗口级——托盘化/最小化时窗口检测会漏，误启第二实例触发单实例激活闪烁。Electron 排除 `--type=` 辅助进程。
-3. **上屏即置顶**，不等标题就绪、不等应用启动；150ms 循环维持。
+3. **上屏即置顶**，不等标题就绪、不等应用启动；循环维持（默认 80ms）。
 4. **视频结束用标题标记**（`<tag>-DONE`），不轮询进程（Edge 辅助进程 lingering 会把动画误判成 15-20s）。
 5. **点击到上屏之间必须有遮罩**；keeper 开头不要清扫遮罩（会把刚拉起的误杀）。
-6. **收尾 = 视频结束 且 应用窗口就绪+2s 稳定**；视频结束时**一个窗口都没有**（托盘化）要立刻 spawn 实例（在仍置位的片头后面拉起窗口），不能干等 HoldCapS——否则用户盯着定格画面白等 10 秒。
-7. .lnk 手术只用**等长替换**，IDList 不可去、不可重建（重建的 IDListSize 差一错误必死）。
-8. **vbs 配置区禁止非 ASCII**——宿主按 GBK 读 vbs，中文标题模式变乱码：匹配不上还是小事，`-like` 遇到乱码里的 `[` 会直接杀死 keeper 进程（日志停在"marker seen"，无任何报错）。非 ASCII 标题用 `*`。
+6. **就绪看内容，不看窗口句柄**——Electron 窗口出现时页面还是白屏；用 `ready-probe.py` 的灰度标准差判定，视频播完 + 页面就绪才交接，页面慢就定格等（`-HoldCapS` 封顶）。
+7. **动画期间应用窗口必须在屏幕外**——应用外框大于无边框动画窗口，留在屏幕上必露边；而且要**每轮重新藏**（应用会异步恢复自己记住的窗口位置，一次性藏必漏）。
+8. **多窗口陷阱**——Electron 冷启动会同时存在多个同尺寸顶层窗口（无标题"影子"窗口 + 真主窗口），还可能先弹 136×39 的小窗。找窗口必须：过滤小尺寸、有标题优先、同优先级取面积最大；藏窗口要**全部藏**（任一都可能是显示白屏的那个）。
+9. **收尾 = 视频结束 且 应用窗口就绪**；视频结束时**一个进程都没有**（托盘化）才 spawn 实例，进程在就只等窗口，绝不拉第二实例。
+10. .lnk 手术只用**等长替换**，IDList 不可去、不可重建（重建的 IDListSize 差一错误必死）。
+11. **vbs 配置区禁止非 ASCII**——宿主按 GBK 读 vbs，中文标题模式变乱码：匹配不上还是小事，`-like` 遇到乱码里的 `[` 会直接杀死 keeper 进程（日志停在"marker seen"，无任何报错）。非 ASCII 标题用 `*`。
+12. **不要在 `Start-Process` 上用 `-NoNewWindow`**——若系统同时存在 `http_proxy` 与 `HTTP_PROXY` 环境变量，PowerShell 建环境字典时撞键直接抛异常（`已添加项。字典中的关键字:"http_proxy"...`），子进程根本起不来。要输出日志就让被启动的脚本自己写文件。
 
 完整根因分析与更多坑见 `references/pitfalls.md`（14 条，全部实战验证）。
 
@@ -144,12 +190,40 @@ cp backup/startmenu-App.lnk.orig "$STARTMENU/App.lnk"
 | `-AppProcess` | `WorkBuddy` | 应用进程名（无 .exe） |
 | `-AppTitleLike` | `WorkBuddy*` | 主窗口标题通配符 |
 | `-TitleTag` | `WB-INTRO` | 播放器标题标记（结尾自动派生 `-DONE`） |
-| `-SettleMs` | `2000` | 视频结束后等应用窗口稳定的时长 |
-| `-HoldCapS` | `10` | 视频结束后等应用窗口就绪的上限 |
+| `-PollMs` | `80` | 守护循环间隔（越小越不容易漏掉应用"偷偷挪回窗口"，代价是 CPU） |
+| `-SettleMs` | `600` | 视频结束后确认窗口稳定的时长 |
+| `-HoldCapS` | `4` | 视频结束后等页面就绪的上限（超时就按现有内容交接，兜底不卡死） |
 | `-TotalCapS` | `90` | 全流程总上限 |
 | `-WindowWaitS` | `12` | 等播放器窗口上屏的上限 |
 | `-SelfCloseS` | `30` | 播放器自关兜底（视频时长+15 左右） |
 | `-Muted` | 关 | 播放器静音开关：默认**带声音**播放；加 `-Muted` 恢复静音起播 |
+| `-Width` / `-Height` | `1120` / `630` | 播放器窗口尺寸（16:9）。改这里必须同步 `wbutil.ps1` 的 `AppWinW/AppWinH` 与 `veil.py` 的 `VEIL_W/VEIL_H`，三处必须一致 |
+| `-Video` | (必填) | 片头视频绝对路径 |
+
+### 尺寸要改的三个地方
+
+```powershell
+play.ps1     param([int]$Width = 1120, [int]$Height = 630)
+wbutil.ps1   [int]$script:AppWinW = 1120;  [int]$script:AppWinH = 630
+veil.py      VEIL_W, VEIL_H = 1120, 630
+```
+
+三者不一致就会出现"黑框比动画大"或"动画和应用一样大但应用内容更小"这类观感问题。
+
+### 视频编码要求
+
+WPF 播放器走 Media Foundation：**H.264 (avc1) + yuv420p + AAC 最稳**。HEVC 源在没装 HEVC 扩展的机器上会黑屏，install 时先用 ffmpeg 转一遍：
+
+```bash
+ffmpeg -i source.mp4 -c:v libx264 -crf 17 -preset slow -pix_fmt yuv420p \
+       -c:a aac -b:a 192k -movflags +faststart intro.mp4
+```
+
+若片头带"XX生成"之类固定位置水印，用 `delogo` 在转码时一并去掉（位置全片固定才有效）：
+
+```bash
+ffmpeg -i source.mp4 -vf "delogo=x=4:y=4:w=100:h=36,delogo=x=460:y=262:w=102:h=54" ...
+```
 
 ## 环境注意（Windows + 本 agent）
 

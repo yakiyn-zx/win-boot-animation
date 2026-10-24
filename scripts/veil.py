@@ -13,15 +13,37 @@ intro.  This veil covers that whole gap:
 Self-exits after `hold` seconds as a leak guard (the keeper normally
 kills it within ~2s of the intro window appearing).
 
-usage: veil.py [hold_seconds] [rrggbb]     e.g.  veil.py 12 05060a
+usage: veil.py [hold_seconds] [rrggbb] [--app <exe>]
+       e.g.  veil.py 12 --app Doubao.exe
 """
 import ctypes
 import sys
 import time
 from ctypes import wintypes
 
-HOLD = float(sys.argv[1]) if len(sys.argv) > 1 else 12.0
-COLOR = int(sys.argv[2], 16) if len(sys.argv) > 2 else 0x000A0605  # #05060a
+# Backwards-compatible arg parsing: positional hold + colour, plus the
+# optional --app used to park the app's windows before the veil is drawn.
+HOLD = 12.0
+COLOR = 0x000A0605  # #05060a
+APP = None
+_i = 1
+while _i < len(sys.argv):
+    _a = sys.argv[_i]
+    if _a == '--app' and _i + 1 < len(sys.argv):
+        APP = sys.argv[_i + 1]
+        _i += 2
+        continue
+    if _i == 1:
+        try:
+            HOLD = float(_a)
+        except ValueError:
+            pass
+    else:
+        try:
+            COLOR = int(_a, 16)
+        except ValueError:
+            pass
+    _i += 1
 
 u = ctypes.windll.user32
 k = ctypes.windll.kernel32
@@ -40,6 +62,9 @@ WM_DESTROY, WM_CLOSE, WM_QUIT = 0x0002, 0x0010, 0x0012
 PM_REMOVE = 0x0001
 SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN = 76, 77
 SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN = 78, 79
+SM_CXSCREEN, SM_CYSCREEN = 0, 1
+# Same rect as the intro player and the app's client area.
+VEIL_W, VEIL_H = 1120, 630
 
 u.DefWindowProcW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM,
                              wintypes.LPARAM]
@@ -72,7 +97,41 @@ def wndproc(h, m, w, l):
     return u.DefWindowProcW(h, m, w, l)
 
 
+def park_app_windows(exe_name):
+    """Move the app's large windows off-screen BEFORE the veil is drawn.
+
+    The veil is exactly intro-sized (so it does not look "bigger than the
+    animation"), but the app's window has a frame that sticks out around
+    that rect -- which shows up as a white rim during the veil.  Hiding the
+    app first keeps the veil exactly the size of the animation.
+    """
+    try:
+        import os
+        import importlib.util
+        here = os.path.dirname(os.path.abspath(__file__))
+        spec = importlib.util.spec_from_file_location(
+            'rp', os.path.join(here, 'ready-probe.py'))
+        rp = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(rp)
+        name = exe_name if exe_name.lower().endswith('.exe') else exe_name + '.exe'
+        pids = rp.proc_pids_by_name(name)
+        if not pids:
+            return 0
+        n = 0
+        for hwnd, w, h in rp.find_windows(pids=pids):
+            if w >= 400 and h >= 300:
+                # SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE
+                u.SetWindowPos(hwnd, None, -4000, 300, 0, 0,
+                               0x0001 | 0x0004 | 0x0010)
+                n += 1
+        return n
+    except Exception:
+        return 0
+
+
 def main():
+    if APP:
+        park_app_windows(APP)
     hinst = k.GetModuleHandleW(None)
     brush = g.CreateSolidBrush(COLOR)
 
@@ -87,10 +146,12 @@ def main():
     if not u.RegisterClassW(ctypes.byref(wc)):
         return
 
-    x = u.GetSystemMetrics(SM_XVIRTUALSCREEN)
-    y = u.GetSystemMetrics(SM_YVIRTUALSCREEN)
-    w = u.GetSystemMetrics(SM_CXVIRTUALSCREEN)
-    h = u.GetSystemMetrics(SM_CYVIRTUALSCREEN)
+    # windowed veil: the same fixed 1120x630 centered rect as the intro
+    # player and the app work window (nothing fullscreen, ever)
+    x = (u.GetSystemMetrics(SM_CXSCREEN) - VEIL_W) // 2
+    y = (u.GetSystemMetrics(SM_CYSCREEN) - VEIL_H) // 2
+    w = VEIL_W
+    h = VEIL_H
 
     hwnd = u.CreateWindowExW(
         WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT,

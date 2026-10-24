@@ -35,10 +35,9 @@ Dim sh, fso
 Dim base, python, app, appProc, appTitle, titleTag, logfile, t0, rc
 
 ' ---- configuration ------------------------------------------------------
-' >>> EDIT THE THREE PATHS BELOW BEFORE FIRST USE <<<
-base     = "<PATH_TO_SKILL_FOLDER>\boot-animation"   ' folder that holds play.ps1 / wait-kiosk.ps1 / etc.
-python   = "<PATH_TO_PYTHON_EXE>"                   ' any Python 3.x interpreter
-app      = "<PATH_TO_YOUR_APP_EXE>"                 ' the real app .exe launched behind the intro
+base     = "C:\Users\PC\.workbuddy\boot-animation"   ' this script set's dir
+python   = "C:\Users\PC\.workbuddy\binaries\python\versions\3.13.12\python.exe"
+app      = "D:\WBD\WorkBuddy\WorkBuddy.exe"          ' the real app exe
 appProc  = "WorkBuddy"                               ' process name (no .exe)
 appTitle = "WorkBuddy*"                              ' main window title pattern
                                                    ' ASCII ONLY!  The vbs host reads
@@ -69,7 +68,10 @@ End If
 ' contents stay visible -- that read as a "flash" at the start of the
 ' animation.  The dark veil (click-through, self-exiting) covers the
 ' gap; the keeper drops it the moment the intro window is pinned.
-sh.Run """" & python & """ """ & base & "\veil.py"" 12", 0, False
+' --app makes the veil hide the app's own windows BEFORE it is drawn: the
+' veil is exactly intro-sized, and the app's framed window would otherwise
+' show a rim of itself around it.
+sh.Run """" & python & """ """ & base & "\veil.py"" 12 --app " & appProc, 0, False
 
 ' ---- launch the intro player (native WPF window, no browser) ------------
 Log "starting intro player"
